@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* React Flow overrides */
+.react-flow__node {
+  border-radius: 8px;
+}
+
+/* Node pulse animation for ACTIVE status */
+@keyframes pulse-node {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(252, 211, 77, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(252, 211, 77, 0);
+  }
+}
+
+.node-active {
+  animation: pulse-node 1.4s ease-in-out infinite;
+}
+
+/* Shake animation for ALERT nodes */
+@keyframes node-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+
+.node-alert {
+  animation: node-shake 0.4s ease-in-out;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #111827;
+}
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4B5563;
+}

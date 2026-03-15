@@ -1,0 +1,5 @@
+jsonpatch>=1.33
+pydantic>=2.7.0
+redis>=5.0.3
+langchain-core>=0.2.0
+langgraph>=0.1.0
