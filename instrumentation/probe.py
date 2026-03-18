@@ -110,7 +110,7 @@ class AgentProbe(BaseCallbackHandler):
     def __init__(
         self,
         run_id: str,
-        redis_url: str = "redis://localhost:6379",
+        redis_url: str | None = None,
         emitter: Optional[RedisEmitter] = None,
     ) -> None:
         super().__init__()
@@ -121,13 +121,13 @@ class AgentProbe(BaseCallbackHandler):
         # ── state tracking ──────────────────────────────────────────
         self._sequence = 0
         self._node_visit_counts: dict[str, int] = {}
-        self._node_start_times: dict[str, float] = {}
 
-        # Maps LangChain internal UUID → wall-clock start time
+        # Maps LangChain run_id (str) → our node_id (only langgraph nodes)
+        self._run_to_node: dict[str, str] = {}
+        # Maps LangChain run_id (str) → parent run_id (str) for ancestry walk
+        self._run_to_parent_run: dict[str, str] = {}
+        # Maps run_id (str) → wall-clock start time
         self._lc_start_times: dict[str, float] = {}
-
-        # Stack of (node_id) for parent resolution  — top = current node
-        self._parent_stack: list[str] = []
 
         # Pending tool call for pairing start → end
         self._pending_tools: dict[str, ToolCall] = {}
@@ -152,8 +152,17 @@ class AgentProbe(BaseCallbackHandler):
     def _iteration(self, node_id: str) -> int:
         return max(0, self._node_visit_counts.get(node_id, 1) - 1)
 
-    def _current_parent(self) -> Optional[str]:
-        return self._parent_stack[-1] if self._parent_stack else None
+    def _node_for_run(self, run_id: UUID) -> Optional[str]:
+        """Return the langgraph node_id for a run, walking up ancestors."""
+        rid = str(run_id)
+        if rid in self._run_to_node:
+            return self._run_to_node[rid]
+        parent = self._run_to_parent_run.get(rid)
+        while parent:
+            if parent in self._run_to_node:
+                return self._run_to_node[parent]
+            parent = self._run_to_parent_run.get(parent)
+        return None
 
     def _emit(self, event: TraceEvent) -> None:
         self._emitter.emit(event)
@@ -173,15 +182,20 @@ class AgentProbe(BaseCallbackHandler):
         metadata: Optional[dict[str, Any]] = None,
         **kwargs: Any,
     ) -> None:
-        raw_name = (
-            serialized.get("name")
-            or (serialized.get("id") or ["unknown"])[-1]
-        )
-        node_id = str(raw_name)
+        # Always record the parent-run relationship so LLM/tool hooks can
+        # walk up the ancestry chain to find their owning langgraph node.
+        if parent_run_id:
+            self._run_to_parent_run[str(run_id)] = str(parent_run_id)
+
+        # Only emit CHAIN_START for actual LangGraph nodes.
+        node_id: Optional[str] = (metadata or {}).get("langgraph_node")
+        if not node_id:
+            return
+
+        self._run_to_node[str(run_id)] = node_id
+        parent = self._run_to_node.get(str(parent_run_id)) if parent_run_id else None
         iteration = self._visit(node_id)
-        parent = self._current_parent()
-        self._parent_stack.append(node_id)
-        self._node_start_times[node_id] = time.time()
+        self._lc_start_times[str(run_id)] = time.time()
 
         state_delta = self._diff.compute_patch(
             self.run_id, node_id, _safe_dict(inputs)
@@ -215,9 +229,13 @@ class AgentProbe(BaseCallbackHandler):
         tags: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> None:
-        node_id = self._parent_stack.pop() if self._parent_stack else "unknown"
-        start = self._node_start_times.pop(node_id, None)
+        node_id = self._run_to_node.pop(str(run_id), None)
+        if not node_id:
+            return  # internal wrapper chain — not a langgraph node
+
+        start = self._lc_start_times.pop(str(run_id), None)
         latency_ms = int((time.time() - start) * 1000) if start else None
+        parent = self._run_to_node.get(str(parent_run_id)) if parent_run_id else None
 
         state_delta = self._diff.compute_patch(
             self.run_id, node_id, _safe_dict(outputs)
@@ -227,7 +245,7 @@ class AgentProbe(BaseCallbackHandler):
             TraceEvent(
                 run_id=self.run_id,
                 node_id=node_id,
-                parent_node_id=self._current_parent(),
+                parent_node_id=parent,
                 event_type=EventType.CHAIN_END,
                 timestamp_ms=self._now_ms(),
                 sequence=self._next_seq(),
@@ -251,14 +269,18 @@ class AgentProbe(BaseCallbackHandler):
         tags: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> None:
-        node_id = self._parent_stack.pop() if self._parent_stack else "unknown"
-        self._node_start_times.pop(node_id, None)
+        node_id = self._run_to_node.pop(str(run_id), None)
+        if not node_id:
+            return
+
+        self._lc_start_times.pop(str(run_id), None)
+        parent = self._run_to_node.get(str(parent_run_id)) if parent_run_id else None
 
         self._emit(
             TraceEvent(
                 run_id=self.run_id,
                 node_id=node_id,
-                parent_node_id=self._current_parent(),
+                parent_node_id=parent,
                 event_type=EventType.CHAIN_END,
                 timestamp_ms=self._now_ms(),
                 sequence=self._next_seq(),
@@ -279,13 +301,16 @@ class AgentProbe(BaseCallbackHandler):
         prompts: list[str],
         *,
         run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
         **kwargs: Any,
     ) -> None:
+        if parent_run_id:
+            self._run_to_parent_run[str(run_id)] = str(parent_run_id)
         self._lc_start_times[str(run_id)] = time.time()
-        node_id = self._current_parent() or "llm"
+        node_id = (self._node_for_run(run_id) if parent_run_id else None) or "llm"
         model_name = (
-            serialized.get("name")
-            or (serialized.get("id") or ["unknown"])[-1]
+            (serialized or {}).get("name")
+            or ((serialized or {}).get("id") or ["unknown"])[-1]
         )
 
         self._emit(
@@ -310,14 +335,17 @@ class AgentProbe(BaseCallbackHandler):
         messages: list[list[BaseMessage]],
         *,
         run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
         **kwargs: Any,
     ) -> None:
         """Handle chat-style LLM start (most modern models use this path)."""
+        if parent_run_id:
+            self._run_to_parent_run[str(run_id)] = str(parent_run_id)
         self._lc_start_times[str(run_id)] = time.time()
-        node_id = self._current_parent() or "llm"
+        node_id = (self._node_for_run(run_id) if parent_run_id else None) or "llm"
         model_name = (
-            serialized.get("name")
-            or (serialized.get("id") or ["unknown"])[-1]
+            (serialized or {}).get("name")
+            or ((serialized or {}).get("id") or ["unknown"])[-1]
         )
 
         # Flatten the last message batch to extract the monologue
@@ -353,7 +381,7 @@ class AgentProbe(BaseCallbackHandler):
     ) -> None:
         start = self._lc_start_times.pop(str(run_id), None)
         latency_ms = int((time.time() - start) * 1000) if start else None
-        node_id = self._current_parent() or "llm"
+        node_id = self._node_for_run(run_id) or "llm"
 
         # Extract token usage (OpenAI and Anthropic both use llm_output)
         usage: dict[str, Any] = {}
@@ -413,11 +441,14 @@ class AgentProbe(BaseCallbackHandler):
         input_str: str,
         *,
         run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
         **kwargs: Any,
     ) -> None:
+        if parent_run_id:
+            self._run_to_parent_run[str(run_id)] = str(parent_run_id)
         self._lc_start_times[str(run_id)] = time.time()
-        tool_name: str = serialized.get("name", "unknown_tool")
-        node_id = self._current_parent() or tool_name
+        tool_name: str = (serialized or {}).get("name", "unknown_tool")
+        node_id = (self._node_for_run(run_id) if parent_run_id else None) or tool_name
 
         try:
             import json as _json
@@ -456,7 +487,7 @@ class AgentProbe(BaseCallbackHandler):
     ) -> None:
         start = self._lc_start_times.pop(str(run_id), None)
         latency_ms = int((time.time() - start) * 1000) if start else None
-        node_id = self._current_parent() or "tool"
+        node_id = self._node_for_run(run_id) or "tool"
 
         pending = self._pending_tools.pop(str(run_id), None)
         tool_call = ToolCall(
@@ -483,10 +514,11 @@ class AgentProbe(BaseCallbackHandler):
         error: Union[Exception, KeyboardInterrupt],
         *,
         run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
         **kwargs: Any,
     ) -> None:
         self._lc_start_times.pop(str(run_id), None)
-        node_id = self._current_parent() or "tool"
+        node_id = self._node_for_run(run_id) or "tool"
         pending = self._pending_tools.pop(str(run_id), None)
 
         self._emit(

@@ -13,11 +13,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
+import threading
 
 import redis.asyncio as aioredis
 
 from shared.schema.trace_event import TraceEvent
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # loads .env from the repo root before any os.getenv() calls
 
 logger = logging.getLogger(__name__)
 
@@ -26,27 +30,21 @@ _RUN_INDEX_KEY = "runs"   # sorted set: member=run_id, score=timestamp_ms
 
 
 class RedisEmitter:
-    def __init__(self, redis_url: str = "redis://localhost:6379") -> None:
-        self._redis_url = redis_url
-        self._client: Optional[aioredis.Redis] = None  # type: ignore[type-arg]
+    def __init__(self, redis_url: str | None = None) -> None:
+        self._redis_url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379")
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _get_client(self) -> aioredis.Redis:  # type: ignore[type-arg]
-        if self._client is None:
-            self._client = await aioredis.from_url(
-                self._redis_url,
-                encoding="utf-8",
-                decode_responses=True,
-            )
-        return self._client
-
     async def _do_publish(self, event: TraceEvent) -> None:
-        """Actual Redis I/O — runs as a background Task."""
+        """Open a fresh connection, publish, then close — no shared state."""
+        client = await aioredis.from_url(
+            self._redis_url,
+            encoding="utf-8",
+            decode_responses=True,
+        )
         try:
-            client = await self._get_client()
             payload = event.model_dump_json()
 
             # 1. Pub/Sub channel for live streaming
@@ -66,7 +64,7 @@ class RedisEmitter:
             await client.zadd(
                 _RUN_INDEX_KEY,
                 {event.run_id: event.timestamp_ms},
-                nx=True,  # only set if not already present
+                nx=True,
             )
         except Exception:
             logger.exception(
@@ -74,6 +72,8 @@ class RedisEmitter:
                 event.event_id,
                 event.run_id,
             )
+        finally:
+            await client.aclose()
 
     # ------------------------------------------------------------------
     # Public API
@@ -81,17 +81,16 @@ class RedisEmitter:
 
     def emit(self, event: TraceEvent) -> None:
         """
-        Schedule the publish as a non-blocking asyncio Task.
-        Safe to call from both sync and async contexts.
+        Fire-and-forget: each publish runs in its own daemon thread with a
+        brand-new event loop, completely isolated from LangGraph's loop(s).
         """
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._do_publish(event))
-        except RuntimeError:
-            # No running event loop (e.g. called from a purely sync context).
-            asyncio.run(self._do_publish(event))
+        t = threading.Thread(
+            target=asyncio.run,
+            args=(self._do_publish(event),),
+            daemon=True,
+        )
+        t.start()
 
     async def close(self) -> None:
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        # no persistent client to close
+        self._client = None

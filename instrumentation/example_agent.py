@@ -9,12 +9,15 @@ Run with:
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import uuid
 from typing import Annotated, TypedDict
 
-from langchain_core.messages import AIMessage, HumanMessage
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
@@ -63,7 +66,7 @@ def calculator(expression: str) -> str:
 
 llm = ChatOpenAI(
     model="gpt-4o-mini",
-    api_key=os.environ.get("OPENAI_API_KEY", "sk-placeholder"),
+    api_key=os.environ["OPENAI_API_KEY"],
 )
 llm_with_tools = llm.bind_tools([web_search, calculator])
 
@@ -84,14 +87,17 @@ def analyst_node(state: AgentState) -> AgentState:
 
 def researcher_node(state: AgentState) -> AgentState:
     """Uses tools to gather information."""
+    _tools = {"web_search": web_search, "calculator": calculator}
     response = llm_with_tools.invoke(state["messages"])
+    new_messages: list = [response]
     notes = ""
     if hasattr(response, "tool_calls") and response.tool_calls:
         for tc in response.tool_calls:
-            if tc["name"] == "web_search":
-                result = web_search.invoke(tc["args"])
-                notes += f"\n{result}"
-    return {"messages": [response], "research_notes": notes, "final_answer": ""}
+            fn = _tools.get(tc["name"])
+            result = fn.invoke(tc["args"]) if fn else f"Unknown tool: {tc['name']}"
+            notes += f"\n{result}"
+            new_messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
+    return {"messages": new_messages, "research_notes": notes, "final_answer": ""}
 
 
 def synthesizer_node(state: AgentState) -> AgentState:
