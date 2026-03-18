@@ -23,15 +23,19 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
+
+load_dotenv()  # loads .env from the repo root before any os.getenv() calls
+
 import redis.asyncio as aioredis
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api.runs import router as runs_router
-from .critic_worker import CriticWorker
-from .redis_subscriber import RedisSubscriber
-from .state_delta_engine import StateDeltaEngine
-from .ws_manager import ConnectionManager
+from backend.api.runs import router as runs_router
+from backend.critic_worker import CriticWorker
+from backend.redis_subscriber import RedisSubscriber
+from backend.state_delta_engine import StateDeltaEngine
+from backend.ws_manager import ConnectionManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

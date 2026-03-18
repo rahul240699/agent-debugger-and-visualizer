@@ -28,6 +28,7 @@ htmlcov/
 
 # ── Node / Next.js ────────────────────────────────────────────────────
 frontend/node_modules/
+frontend/package-lock.json
 frontend/.next/
 frontend/out/
 frontend/.cache/

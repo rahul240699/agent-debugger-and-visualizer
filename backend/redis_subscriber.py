@@ -12,7 +12,7 @@ from typing import Optional
 
 import redis.asyncio as aioredis
 
-from .ws_manager import ConnectionManager
+from backend.ws_manager import ConnectionManager
 
 logger = logging.getLogger(__name__)
 
