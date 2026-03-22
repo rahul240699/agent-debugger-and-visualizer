@@ -128,6 +128,8 @@ class AgentProbe(BaseCallbackHandler):
         self._run_to_parent_run: dict[str, str] = {}
         # Maps run_id (str) → wall-clock start time
         self._lc_start_times: dict[str, float] = {}
+        # Last successfully completed langgraph node (for sequential edge wiring)
+        self._prev_node: Optional[str] = None
 
         # Pending tool call for pairing start → end
         self._pending_tools: dict[str, ToolCall] = {}
@@ -167,6 +169,10 @@ class AgentProbe(BaseCallbackHandler):
     def _emit(self, event: TraceEvent) -> None:
         self._emitter.emit(event)
 
+    def flush(self) -> None:
+        """Wait for all pending Redis publishes to complete. Call after graph.invoke()."""
+        self._emitter.flush()
+
     # ------------------------------------------------------------------
     # Chain hooks (maps to LangGraph node lifecycle)
     # ------------------------------------------------------------------
@@ -192,8 +198,22 @@ class AgentProbe(BaseCallbackHandler):
         if not node_id:
             return
 
+        # Outermost LangGraph node chains always have serialized=None.
+        # Routing functions (RunnableLambda) and internal wrappers have a
+        # non-None serialized dict — skip them to prevent double-counting.
+        if serialized is not None:
+            return
+
+        # Also skip direct nested child chains (belt-and-suspenders).
+        parent_node = self._run_to_node.get(str(parent_run_id)) if parent_run_id else None
+        if parent_node == node_id:
+            return
+
         self._run_to_node[str(run_id)] = node_id
-        parent = self._run_to_node.get(str(parent_run_id)) if parent_run_id else None
+        # For edges: prefer LangChain parent if it's a known node,
+        # otherwise fall back to the last completed sequential node.
+        lc_parent = self._run_to_node.get(str(parent_run_id)) if parent_run_id else None
+        parent = lc_parent or self._prev_node
         iteration = self._visit(node_id)
         self._lc_start_times[str(run_id)] = time.time()
 
@@ -236,6 +256,7 @@ class AgentProbe(BaseCallbackHandler):
         start = self._lc_start_times.pop(str(run_id), None)
         latency_ms = int((time.time() - start) * 1000) if start else None
         parent = self._run_to_node.get(str(parent_run_id)) if parent_run_id else None
+        self._prev_node = node_id  # wire next sequential node to this one
 
         state_delta = self._diff.compute_patch(
             self.run_id, node_id, _safe_dict(outputs)

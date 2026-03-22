@@ -1,61 +1,123 @@
 "use client";
 
 /**
- * StateInspector — shows the raw JSON state mirror and the last RFC 6902 diff
- * for the currently selected DAG node.
- *
- * Uses react-diff-viewer-continued to render adds (green) / removes (red) /
- * changes (yellow) for the state delta.
+ * StateInspector — live JSON tree of the selected node's current state.
+ * Updates in real-time as CHAIN_START / CHAIN_END events arrive.
  */
 
-import dynamic from "next/dynamic";
-import { useMemo } from "react";
+import { useState } from "react";
 import { useRunStore } from "@/store/useRunStore";
 
-// react-diff-viewer-continued is a CommonJS module — load it client-side only
-const ReactDiffViewer = dynamic(
-  () => import("react-diff-viewer-continued"),
-  { ssr: false }
-);
+// ---------------------------------------------------------------------------
+// State section renderer — one collapsible section per top-level key
+// ---------------------------------------------------------------------------
+
+const SKIP_KEYS = new Set(["additional_kwargs", "response_metadata", "id"]);
+const TRUNCATE = 300;
+
+type FlatEntry = { key: string; value: string };
+
+function flattenRelative(val: unknown, leafKey: string, out: FlatEntry[]): void {
+  if (val === null || val === undefined) {
+    out.push({ key: leafKey, value: "null" });
+    return;
+  }
+  if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
+    out.push({ key: leafKey, value: String(val) });
+    return;
+  }
+  if (Array.isArray(val)) {
+    if (val.length === 0) {
+      out.push({ key: leafKey, value: "(empty)" });
+      return;
+    }
+    val.forEach((item, i) => flattenRelative(item, String(i), out));
+    return;
+  }
+  if (typeof val === "object") {
+    const entries = Object.entries(val as Record<string, unknown>).filter(
+      ([k]) => !SKIP_KEYS.has(k)
+    );
+    if (entries.length === 0) {
+      out.push({ key: leafKey, value: "(empty)" });
+      return;
+    }
+    entries.forEach(([k, v]) => flattenRelative(v, k, out));
+  }
+}
+
+function EntryRow({ entryKey, value }: { entryKey: string; value: string }) {
+  const [show, setShow] = useState(false);
+  const isLong = value.length > TRUNCATE;
+  return (
+    <div className="flex gap-2 items-baseline min-w-0 py-0.5">
+      <span className="text-indigo-300 font-mono shrink-0 text-[10px]">{entryKey}:</span>
+      <span className="text-emerald-300 text-[10px] break-all leading-relaxed">
+        {isLong && !show ? value.slice(0, TRUNCATE) + "…" : value}
+        {isLong && (
+          <button
+            onClick={() => setShow((x) => !x)}
+            className="ml-1 text-[9px] text-gray-500 hover:text-gray-300 underline"
+          >
+            {show ? "less" : "more"}
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function FlatStateView({ state }: { state: Record<string, unknown> }) {
+  return (
+    <div className="space-y-1">
+      {Object.entries(state).map(([topKey, topVal]) => {
+        const entries: FlatEntry[] = [];
+        flattenRelative(topVal, "", entries);
+        // single scalar — show inline, no dropdown
+        if (entries.length === 1 && entries[0].key === "") {
+          return (
+            <div key={topKey} className="flex gap-2 items-baseline min-w-0 py-0.5">
+              <span className="text-indigo-300 font-mono shrink-0 text-[10px]">{topKey}:</span>
+              <span className="text-emerald-300 text-[10px] break-all leading-relaxed">
+                {entries[0].value}
+              </span>
+            </div>
+          );
+        }
+        return (
+          <details key={topKey} open className="group">
+            <summary className="cursor-pointer select-none list-none flex items-center gap-1 py-0.5">
+              <span className="text-gray-500 text-[10px] transition-transform group-open:rotate-90 inline-block">
+                ▶
+              </span>
+              <span className="text-indigo-400 font-mono text-[10px] font-semibold">
+                {topKey}
+              </span>
+              <span className="text-gray-600 text-[9px] ml-1">
+                ({entries.length})
+              </span>
+            </summary>
+            <div className="ml-3 pl-2 border-l border-gray-700 mt-0.5 mb-1">
+              {entries.map(({ key, value }) => (
+                <EntryRow key={key} entryKey={key || "·"} value={value} />
+              ))}
+            </div>
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 export default function StateInspector() {
   const selectedId = useRunStore((s) => s.selectedNodeId);
   const nodes = useRunStore((s) => s.nodes);
-  const events = useRunStore((s) => s.events);
 
   const node = selectedId ? nodes[selectedId] : null;
-
-  // Find the last STATE_DELTA / CHAIN_END event for this node to show a diff
-  const lastDeltaEvent = useMemo(() => {
-    if (!selectedId) return null;
-    const relevant = events
-      .filter(
-        (e) =>
-          e.node_id === selectedId &&
-          e.payload.state_delta.length > 0 &&
-          (e.event_type === "CHAIN_END" ||
-            e.event_type === "CHAIN_START" ||
-            e.event_type === "STATE_DELTA")
-      )
-      .slice(-1)[0];
-    return relevant ?? null;
-  }, [selectedId, events]);
-
-  // Reconstruct "before" state by reverse-applying the last patch
-  const { before, after } = useMemo(() => {
-    if (!node) return { before: "{}", after: "{}" };
-    const after = JSON.stringify(node.stateMirror, null, 2);
-    if (!lastDeltaEvent || lastDeltaEvent.payload.state_delta.length === 0) {
-      return { before: after, after };
-    }
-    // Show the raw ops as "before" for simplicity
-    const opsSummary = JSON.stringify(
-      lastDeltaEvent.payload.state_delta,
-      null,
-      2
-    );
-    return { before: opsSummary, after };
-  }, [node, lastDeltaEvent]);
 
   if (!node) {
     return (
@@ -65,9 +127,11 @@ export default function StateInspector() {
     );
   }
 
+  const hasState = Object.keys(node.stateMirror).length > 0;
+
   return (
     <div className="flex flex-col h-full text-xs">
-      {/* Node info header */}
+      {/* Header */}
       <div className="px-3 py-2 border-b border-gray-800 shrink-0 space-y-0.5">
         <div className="font-mono text-indigo-300 truncate">{node.label}</div>
         <div className="text-gray-500">
@@ -91,8 +155,7 @@ export default function StateInspector() {
         </div>
         {node.telemetry.latency_ms != null && (
           <div className="text-gray-500">
-            latency: {node.telemetry.latency_ms}ms &nbsp;|&nbsp;
-            tokens:{" "}
+            latency: {node.telemetry.latency_ms}ms &nbsp;|&nbsp; tokens:{" "}
             {(node.telemetry.prompt_tokens ?? 0) +
               (node.telemetry.completion_tokens ?? 0)}
           </div>
@@ -138,32 +201,22 @@ export default function StateInspector() {
         </details>
       )}
 
-      {/* State diff viewer */}
+      {/* Live state tree */}
       <div className="flex-1 overflow-auto">
-        <div className="px-2 py-1 text-[10px] text-gray-500 border-b border-gray-800 sticky top-0 bg-gray-900">
-          {lastDeltaEvent ? "Last delta ops → current state" : "Current state"}
+        <div className="px-2 py-1 text-[10px] text-gray-500 border-b border-gray-800 sticky top-0 bg-gray-900 z-10">
+          Live state
+          {node.status === "ACTIVE" && (
+            <span className="ml-2 inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse align-middle" />
+          )}
         </div>
-        <div className="text-[10px] [&_*]:!text-[10px] [&_*]:!font-mono">
-          <ReactDiffViewer
-            oldValue={before}
-            newValue={after}
-            splitView={false}
-            useDarkTheme
-            hideLineNumbers
-            styles={{
-              variables: {
-                dark: {
-                  diffViewerBackground: "#111827",
-                  addedBackground: "#052e16",
-                  addedColor: "#6ee7b7",
-                  removedBackground: "#450a0a",
-                  removedColor: "#fca5a5",
-                  wordAddedBackground: "#166534",
-                  wordRemovedBackground: "#7f1d1d",
-                },
-              },
-            }}
-          />
+        <div className="p-3 font-mono text-[10px] leading-relaxed">
+          {hasState ? (
+            <FlatStateView state={node.stateMirror} />
+          ) : (
+            <span className="text-gray-600 italic">
+              {node.status === "ACTIVE" ? "Waiting for state…" : "No state captured."}
+            </span>
+          )}
         </div>
       </div>
     </div>

@@ -32,6 +32,7 @@ _RUN_INDEX_KEY = "runs"   # sorted set: member=run_id, score=timestamp_ms
 class RedisEmitter:
     def __init__(self, redis_url: str | None = None) -> None:
         self._redis_url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379")
+        self._threads: list[threading.Thread] = []
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -81,16 +82,23 @@ class RedisEmitter:
 
     def emit(self, event: TraceEvent) -> None:
         """
-        Fire-and-forget: each publish runs in its own daemon thread with a
+        Fire-and-forget: each publish runs in its own thread with a
         brand-new event loop, completely isolated from LangGraph's loop(s).
+        Threads are tracked so flush() can wait for all of them.
         """
         t = threading.Thread(
             target=asyncio.run,
             args=(self._do_publish(event),),
-            daemon=True,
+            daemon=False,
         )
         t.start()
+        self._threads.append(t)
+
+    def flush(self, timeout: float = 10.0) -> None:
+        """Block until all pending publishes have completed."""
+        threads, self._threads = self._threads, []
+        for t in threads:
+            t.join(timeout=timeout)
 
     async def close(self) -> None:
-        # no persistent client to close
-        self._client = None
+        pass  # no persistent client
