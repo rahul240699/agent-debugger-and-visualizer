@@ -175,13 +175,15 @@ _TOOL_MAP = {t.name: t for t in ALL_TOOLS}
 class ResearchState(TypedDict):
     messages: Annotated[list, add_messages]
     topic: str
-    fact_check_notes: str
-    domain_notes: str
-    aggregated_draft: str
-    critic_verdict: str  # "approve" | "revise"
-    revision_notes: str
-    final_answer: str
-    revision_count: int
+    # These fields may be written by multiple parallel nodes in the same step,
+    # so they use a reducer that concatenates all values with a newline separator.
+    fact_check_notes: Annotated[str, lambda a, b: (a + "\n" + b).strip()]
+    domain_notes: Annotated[str, lambda a, b: (a + "\n" + b).strip()]
+    aggregated_draft: Annotated[str, lambda a, b: b if b else a]
+    critic_verdict: Annotated[str, lambda a, b: b if b else a]  # "approve" | "revise"
+    revision_notes: Annotated[str, lambda a, b: b if b else a]
+    final_answer: Annotated[str, lambda a, b: b if b else a]
+    revision_count: Annotated[int, lambda a, b: a + b]
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +298,7 @@ def _revise(state: ResearchState) -> dict:
         "messages": [response],
         "aggregated_draft": response.content,
         "revision_notes": response.content,
-        "revision_count": state.get("revision_count", 0) + 1,
+        "revision_count": 1,
         "critic_verdict": "approve",
     }
 
@@ -312,8 +314,7 @@ def _web_researcher(state: ResearchState) -> dict:
         ))
     ])
     msgs, notes = _exec_tools(response)
-    existing = state.get("fact_check_notes") or ""
-    return {"messages": msgs, "fact_check_notes": (existing + "\n" + notes).strip()}
+    return {"messages": msgs, "fact_check_notes": notes}
 
 
 def _summarizer(state: ResearchState) -> dict:
