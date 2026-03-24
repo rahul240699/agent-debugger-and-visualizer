@@ -290,11 +290,10 @@ TOPICS = [
 ]
 
 
-def run(topic: str | None = None) -> None:
+def run(topic: str | None = None, run_id: str | None = None) -> None:
     import random
     chosen = topic or random.choice(TOPICS)
-
-    run_id = f"run-{uuid.uuid4().hex[:8]}"
+    run_id = run_id or f"run-{uuid.uuid4().hex[:8]}"
     print(f"Starting run  : {run_id}")
     print(f"Topic         : {chosen}")
     print(f"Dashboard URL : http://localhost:3000/dashboard?run={run_id}")

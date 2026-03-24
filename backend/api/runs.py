@@ -3,6 +3,7 @@ REST API for historical run data.
 
 Endpoints
 ---------
+POST /api/run                         — launch an example-agent run (returns run_id)
 GET  /api/runs                        — list all run IDs (newest first)
 GET  /api/runs/{run_id}/events        — ordered event replay from Redis Stream
 GET  /api/runs/{run_id}/state         — current materialised state of every node
@@ -12,9 +13,12 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import uuid
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 
 _REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
@@ -33,6 +37,26 @@ async def get_redis(request: Request) -> aioredis.Redis:  # type: ignore[type-ar
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+class RunRequest(BaseModel):
+    topic: str
+
+
+@router.post("/run")
+async def start_run(body: RunRequest) -> dict:
+    """Spawn a new example-agent run in a background thread and return its run_id."""
+    run_id = f"run-{uuid.uuid4().hex[:8]}"
+    topic = body.topic.strip() or "The impact of large language models on scientific research"
+
+    def _run() -> None:
+        # Import here so the heavy LangChain stack only loads inside the thread
+        from instrumentation.example_agent import run as agent_run  # noqa: PLC0415
+        agent_run(topic=topic, run_id=run_id)
+
+    t = threading.Thread(target=_run, daemon=True, name=f"agent-run-{run_id}")
+    t.start()
+    return {"run_id": run_id}
 
 
 @router.get("/runs")

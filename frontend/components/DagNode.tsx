@@ -1,55 +1,48 @@
 "use client";
 
-/**
- * DagNode — custom React Flow node component.
- *
- * Visual states
- * -------------
- *  PENDING → gray    (#6B7280)  no animation
- *  ACTIVE  → yellow  (#FCD34D)  CSS pulse ring
- *  SUCCESS → green   (#10B981)  no animation
- *  ALERT   → red     (#EF4444)  CSS shake
- */
-
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useRunStore, type DagNodeData } from "@/store/useRunStore";
 
 const STATUS_STYLE: Record<
   string,
-  { border: string; bg: string; text: string; animation: string }
+  { border: string; bg: string; text: string; animation: string; glow: string }
 > = {
   PENDING: {
-    border: "border-gray-500",
-    bg: "bg-gray-800",
-    text: "text-gray-300",
+    border: "border-gray-700",
+    bg: "bg-gray-900",
+    text: "text-gray-400",
     animation: "",
+    glow: "",
   },
   ACTIVE: {
-    border: "border-yellow-400",
-    bg: "bg-yellow-900/30",
+    border: "border-yellow-400/80",
+    bg: "bg-yellow-950/40",
     text: "text-yellow-300",
     animation: "node-active",
+    glow: "shadow-[0_0_16px_2px_rgba(250,204,21,0.2)]",
   },
   SUCCESS: {
-    border: "border-emerald-500",
-    bg: "bg-emerald-900/20",
+    border: "border-emerald-600/70",
+    bg: "bg-emerald-950/30",
     text: "text-emerald-300",
     animation: "",
+    glow: "",
   },
   ALERT: {
-    border: "border-red-500",
-    bg: "bg-red-900/20",
+    border: "border-red-500/70",
+    bg: "bg-red-950/30",
     text: "text-red-300",
     animation: "node-alert",
+    glow: "shadow-[0_0_16px_2px_rgba(239,68,68,0.18)]",
   },
 };
 
 const STATUS_DOT: Record<string, string> = {
-  PENDING: "bg-gray-500",
-  ACTIVE: "bg-yellow-400",
+  PENDING: "bg-gray-600",
+  ACTIVE:  "bg-yellow-400",
   SUCCESS: "bg-emerald-500",
-  ALERT: "bg-red-500",
+  ALERT:   "bg-red-500",
 };
 
 type DagNodeProps = NodeProps & {
@@ -74,9 +67,9 @@ export const DagNodeComponent = memo(function DagNodeComponent({
       <div
         onClick={() => selectNode(data.id)}
         className={`
-          relative px-3 py-2 rounded-lg border cursor-pointer select-none transition-all
+          relative px-3 py-2.5 rounded-xl border cursor-pointer select-none transition-all
           min-w-[160px] max-w-[220px]
-          ${style.border} ${style.bg} ${style.animation}
+          ${style.border} ${style.bg} ${style.animation} ${style.glow}
           ${selected ? "ring-2 ring-indigo-400 ring-offset-1 ring-offset-gray-950" : ""}
         `}
       >
@@ -114,13 +107,13 @@ export const DagNodeComponent = memo(function DagNodeComponent({
         {/* Critic alignment score badge */}
         {data.critic?.alignment_score !== undefined && (
           <div
-            className={`mt-1 text-[10px] px-1 rounded text-center font-mono
+            className={`mt-1.5 text-[10px] px-1.5 py-0.5 rounded-md text-center font-mono font-medium
               ${
                 data.critic.alignment_score >= 0.8
-                  ? "bg-emerald-800 text-emerald-300"
+                  ? "bg-emerald-900/60 text-emerald-300 border border-emerald-700/40"
                   : data.critic.alignment_score >= 0.5
-                    ? "bg-yellow-800 text-yellow-300"
-                    : "bg-red-800 text-red-300"
+                    ? "bg-yellow-900/60 text-yellow-300 border border-yellow-700/40"
+                    : "bg-red-900/60 text-red-300 border border-red-700/40"
               }
               ${data.critic.divergence_flag ? "ring-1 ring-red-400" : ""}
             `}
