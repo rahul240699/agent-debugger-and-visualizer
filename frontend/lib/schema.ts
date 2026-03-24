@@ -12,6 +12,7 @@ export type {
   CriticScore,
   TracePayload,
   TraceEvent,
+  GraphTopology,
   HydrateMessage,
   WsMessage,
 } from "../../shared/schema/trace_event";

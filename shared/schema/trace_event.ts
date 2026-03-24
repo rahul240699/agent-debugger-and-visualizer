@@ -91,12 +91,19 @@ export interface TraceEvent {
 // WebSocket control messages
 // ---------------------------------------------------------------------------
 
+export interface GraphTopology {
+  nodes: Array<{ id: string; type: string }>;
+  edges: Array<{ source: string; target: string }>;
+}
+
 export interface HydrateMessage {
   type: "HYDRATE";
   run_id: string;
   materialized_state: Record<string, unknown>;
   events: TraceEvent[];
   last_sequence: number;
+  /** Present for runs started via the Pipeline Builder */
+  graph_topology?: GraphTopology;
 }
 
 export type WsMessage = TraceEvent | HydrateMessage;

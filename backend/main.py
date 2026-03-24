@@ -137,6 +137,12 @@ async def websocket_endpoint(websocket: WebSocket, run_id: str) -> None:
             "events": events,
             "last_sequence": last_seq,
         }
+
+        # Attach builder topology if this run was started via the Pipeline Builder
+        topology_raw = await redis_client.get(f"topology:{run_id}")
+        if topology_raw:
+            hydrate_msg["graph_topology"] = json.loads(topology_raw)
+
         await websocket.send_text(json.dumps(hydrate_msg))
 
         # ── keep alive / wait for disconnect ─────────────────────────

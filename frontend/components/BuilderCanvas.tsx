@@ -78,11 +78,6 @@ interface ComponentMeta {
 // Track how many instances of each type we've placed
 const instanceCounts: Record<string, number> = {};
 
-let nodeIdCounter = 0;
-function nextNodeId() {
-  return `node-${++nodeIdCounter}`;
-}
-
 function gridPosition(total: number) {
   // Waterfall down-centre starting position, offset for each new node
   const col = Math.floor(total / 8);
@@ -127,7 +122,7 @@ export default function BuilderCanvas() {
   function addComponent(meta: ComponentMeta) {
     const count = instanceCounts[meta.key] ?? 0;
     instanceCounts[meta.key] = count + 1;
-    const id = nextNodeId();
+    const id = count === 0 ? meta.key : `${meta.key}-${count + 1}`;
 
     const newNode: Node = {
       id,
@@ -196,7 +191,6 @@ export default function BuilderCanvas() {
     setEdges([]);
     setValidation("");
     Object.keys(instanceCounts).forEach((k) => delete instanceCounts[k]);
-    nodeIdCounter = 0;
   }
 
   return (

@@ -412,6 +412,19 @@ class AgentProbe(BaseCallbackHandler):
                 response.llm_output.get("usage", {}),
             )
 
+        # Fallback: newer LangChain stores usage in AIMessage.usage_metadata
+        # with keys input_tokens / output_tokens / total_tokens.
+        if not usage:
+            for gen_list in response.generations:
+                for gen in gen_list:
+                    msg = getattr(gen, "message", None)
+                    um = getattr(msg, "usage_metadata", None)
+                    if um:
+                        usage = dict(um)
+                        break
+                if usage:
+                    break
+
         # Extract text / thinking from generations
         monologue: Optional[str] = None
         for gen_list in response.generations:

@@ -7,10 +7,11 @@ POST /api/build               — accept a graph spec, start it in a background 
 """
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from instrumentation import AgentProbe
@@ -75,7 +76,7 @@ async def get_components() -> list[ComponentInfo]:
 
 
 @router.post("/build")
-async def build_and_run(req: BuildRequest) -> dict:
+async def build_and_run(req: BuildRequest, request: Request) -> dict:
     """
     Build a LangGraph from the visual spec and run it asynchronously.
     Returns {run_id} immediately; the client should open /dashboard?run={run_id}.
@@ -97,6 +98,14 @@ async def build_and_run(req: BuildRequest) -> dict:
     from langchain_core.messages import HumanMessage
 
     run_id = req.run_id or f"run-{uuid.uuid4().hex[:8]}"
+
+    # Persist topology so the WS HYDRATE message can include it for the dashboard
+    redis_client = request.app.state.redis
+    await redis_client.set(
+        f"topology:{run_id}",
+        json.dumps({"nodes": nodes_list, "edges": edges_list}),
+        ex=86400,  # TTL 24 h
+    )
 
     initial_state: ResearchState = {
         "messages": [HumanMessage(content=topic)],

@@ -137,6 +137,17 @@ export const useRunStore = create<RunStore>()((set) => ({
         draft.events = [];
         draft.seenIds = {};
         draft.nodeVisitCounts = {};
+
+        // Pre-populate edges from explicit topology (Pipeline Builder runs).
+        // This ensures fan-in edges (multiple parents → one node) all appear,
+        // since the probe can only infer one parent at a time.
+        if (msg.graph_topology) {
+          for (const e of msg.graph_topology.edges) {
+            const edgeId = `${e.source}->${e.target}`;
+            draft.edges.push({ id: edgeId, source: e.source, target: e.target });
+          }
+        }
+
         // Replay all historical events in order
         for (const event of msg.events) {
           applyEventMutation(draft, event);
