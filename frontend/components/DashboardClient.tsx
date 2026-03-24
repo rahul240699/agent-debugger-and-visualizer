@@ -120,6 +120,13 @@ export default function DashboardClient() {
 
         <div className="w-px h-5 bg-gray-800 shrink-0" />
 
+          <Link
+            href="/builder"
+            className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 bg-gray-800/60 hover:bg-gray-800 border border-gray-700/50 rounded-lg px-2.5 py-1.5 transition shrink-0"
+          >
+            <span>⬡</span>
+            <span>Builder</span>
+          </Link>
         {/* Run input + connect */}
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <input

@@ -101,6 +101,12 @@ export default function Home() {
         >
           Open dashboard →
         </a>
+        <a
+          href="/builder"
+          className="text-xs bg-indigo-900/50 hover:bg-indigo-900/80 text-indigo-300 border border-indigo-700/50 rounded-lg px-3 py-1.5 transition font-medium"
+        >
+          Build your own ⬡
+        </a>
       </header>
 
       <main className="flex-1 max-w-4xl mx-auto w-full px-6 py-16 flex flex-col gap-12">

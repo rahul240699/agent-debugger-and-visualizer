@@ -32,6 +32,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.runs import router as runs_router
+from backend.api.builder import router as builder_router
 from backend.critic_worker import CriticWorker
 from backend.redis_subscriber import RedisSubscriber
 from backend.state_delta_engine import StateDeltaEngine
@@ -97,6 +98,7 @@ app.add_middleware(
 )
 
 app.include_router(runs_router, prefix="/api")
+app.include_router(builder_router, prefix="/api")
 
 
 # ---------------------------------------------------------------------------
