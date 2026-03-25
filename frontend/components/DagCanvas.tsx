@@ -176,7 +176,7 @@ export default function DagCanvas() {
       />
       <MiniMap
         nodeColor={(n) => {
-          const status = (n.data as DagNodeData)?.status ?? "PENDING";
+          const status = (n.data as unknown as DagNodeData)?.status ?? "PENDING";
           const colors: Record<string, string> = {
             PENDING: "#6B7280",
             ACTIVE: "#FCD34D",
