@@ -19,8 +19,7 @@ services:
         value: "4"
     healthCheckPath: /health
 
-databases:
   - type: redis
     name: agent-debugger-redis
     plan: free
-    maxmemoryPolicy: noeviction
+    ipAllowList: []
