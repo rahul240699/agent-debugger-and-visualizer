@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: agent-debugger-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: agent-debugger-redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false           # set manually in Render dashboard
+      - key: CRITIC_MODEL
+        value: gpt-4o-mini
+      - key: CRITIC_MAX_CONCURRENT
+        value: "4"
+    healthCheckPath: /health
+
+databases:
+  - type: redis
+    name: agent-debugger-redis
+    plan: free
+    maxmemoryPolicy: noeviction

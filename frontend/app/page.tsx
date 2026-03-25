@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
 const EXAMPLES = [
   {
     title: "LLMs in Scientific Research",
@@ -68,7 +70,7 @@ export default function Home() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("http://localhost:8000/api/run", {
+      const res = await fetch(`${API_URL}/api/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ topic: activeTopic }),
