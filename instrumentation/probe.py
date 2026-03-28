@@ -370,8 +370,11 @@ class AgentProbe(BaseCallbackHandler):
             self._run_to_parent_run[str(run_id)] = str(parent_run_id)
         self._lc_start_times[str(run_id)] = time.time()
         node_id = (self._node_for_run(run_id) if parent_run_id else None) or "llm"
+        _kwargs = (serialized or {}).get("kwargs", {})
         model_name = (
-            (serialized or {}).get("name")
+            _kwargs.get("model_name")
+            or _kwargs.get("model")
+            or (serialized or {}).get("name")
             or ((serialized or {}).get("id") or ["unknown"])[-1]
         )
 
@@ -405,8 +408,11 @@ class AgentProbe(BaseCallbackHandler):
             self._run_to_parent_run[str(run_id)] = str(parent_run_id)
         self._lc_start_times[str(run_id)] = time.time()
         node_id = (self._node_for_run(run_id) if parent_run_id else None) or "llm"
+        _kwargs = (serialized or {}).get("kwargs", {})
         model_name = (
-            (serialized or {}).get("name")
+            _kwargs.get("model_name")
+            or _kwargs.get("model")
+            or (serialized or {}).get("name")
             or ((serialized or {}).get("id") or ["unknown"])[-1]
         )
 
@@ -447,11 +453,13 @@ class AgentProbe(BaseCallbackHandler):
 
         # Extract token usage (OpenAI and Anthropic both use llm_output)
         usage: dict[str, Any] = {}
+        llm_model_name: Optional[str] = None
         if response.llm_output:
             usage = response.llm_output.get(
                 "token_usage",
                 response.llm_output.get("usage", {}),
             )
+            llm_model_name = response.llm_output.get("model_name") or response.llm_output.get("model")
 
         # Fallback: newer LangChain stores usage in AIMessage.usage_metadata
         # with keys input_tokens / output_tokens / total_tokens.
@@ -501,6 +509,7 @@ class AgentProbe(BaseCallbackHandler):
                         ),
                         total_tokens=usage.get("total_tokens"),
                         latency_ms=latency_ms,
+                        model_name=str(llm_model_name) if llm_model_name else None,
                     ),
                 ),
             )

@@ -10,6 +10,7 @@ import FlameGraph from "./FlameGraph";
 import StateInspector from "./StateInspector";
 import CriticPanel from "./CriticPanel";
 import InterruptBanner from "./InterruptBanner";
+import { calcCost, formatCost, costColor } from "@/lib/pricing";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -39,6 +40,19 @@ export default function DashboardClient() {
   const eventCount    = useRunStore((s) => s.events.length);
   const reset         = useRunStore((s) => s.reset);
   const setStoreRunId = useRunStore((s) => s.setRunId);
+  const totalCost     = useRunStore((s) => {
+    let sum = 0;
+    let hasAny = false;
+    for (const node of Object.values(s.nodes)) {
+      const c = calcCost(
+        node.telemetry.prompt_tokens,
+        node.telemetry.completion_tokens,
+        node.telemetry.model_name
+      );
+      if (c != null) { sum += c; hasAny = true; }
+    }
+    return hasAny ? sum : null;
+  });
 
   useWebSocket(activeRunId);
 
@@ -122,7 +136,7 @@ export default function DashboardClient() {
         <div className="w-px h-5 bg-gray-800 shrink-0" />
 
           <Link
-            href="/builder"
+            href="/builder?restore=1"
             className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 bg-gray-800/60 hover:bg-gray-800 border border-gray-700/50 rounded-lg px-2.5 py-1.5 transition shrink-0"
           >
             <span>⬡</span>
@@ -198,6 +212,15 @@ export default function DashboardClient() {
                 <>
                   <span className="text-gray-700">·</span>
                   <span className="text-gray-400">{nodeCount}n / {eventCount}e</span>
+                  {totalCost != null && (
+                    <>
+                      <span className="text-gray-700">·</span>
+                      <span className={`font-mono font-semibold ${costColor(totalCost)}`}
+                        title="Estimated total LLM cost for this run">
+                        {formatCost(totalCost)}
+                      </span>
+                    </>
+                  )}
                 </>
               )}
             </div>

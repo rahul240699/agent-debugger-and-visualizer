@@ -78,6 +78,28 @@ interface ComponentMeta {
 // Track how many instances of each type we've placed
 const instanceCounts: Record<string, number> = {};
 
+const LS_KEY = "builder_canvas_v1";
+
+function saveToStorage(nodes: Node[], edges: Edge[], topic: string) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({ nodes, edges, topic }));
+  } catch { /* quota exceeded — ignore */ }
+}
+
+function loadFromStorage(): { nodes: Node[]; edges: Edge[]; topic: string } | null {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function clearStorage() {
+  try { localStorage.removeItem(LS_KEY); } catch { /* ignore */ }
+}
+
 function gridPosition(total: number) {
   // Waterfall down-centre starting position, offset for each new node
   const col = Math.floor(total / 8);
@@ -88,6 +110,8 @@ function gridPosition(total: number) {
 export default function BuilderCanvas() {
   const router = useRouter();
   const [components, setComponents] = useState<ComponentMeta[]>([]);
+
+  // Always start empty — no SSR/client mismatch
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [topic, setTopic] = useState("");
@@ -95,6 +119,25 @@ export default function BuilderCanvas() {
   const [error, setError] = useState("");
   const [validation, setValidation] = useState("");
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  // Only restore when navigating back from the dashboard (?restore=1)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("restore") !== "1") return;
+    const saved = loadFromStorage();
+    if (!saved) return;
+    setNodes(saved.nodes);
+    setEdges(saved.edges);
+    setTopic(saved.topic);
+    for (const n of saved.nodes) {
+      const key = (n.data as BuilderNodeData).componentKey;
+      if (key) instanceCounts[key] = (instanceCounts[key] ?? 0) + 1;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-save on every change (topic/nodes/edges)
+  useEffect(() => { saveToStorage(nodes, edges, topic); }, [nodes, edges, topic]);
 
   // Fetch component registry
   useEffect(() => {
@@ -193,8 +236,10 @@ export default function BuilderCanvas() {
   function handleClear() {
     setNodes([]);
     setEdges([]);
+    setTopic("");
     setValidation("");
     Object.keys(instanceCounts).forEach((k) => delete instanceCounts[k]);
+    clearStorage();
   }
 
   return (

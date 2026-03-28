@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import { useRunStore } from "@/store/useRunStore";
+import { calcCost, formatCost, costColor, lookupModel } from "@/lib/pricing";
 
 // ---------------------------------------------------------------------------
 // State section renderer — one collapsible section per top-level key
@@ -154,10 +155,45 @@ export default function StateInspector() {
           )}
         </div>
         {node.telemetry.latency_ms != null && (
-          <div className="text-gray-500">
-            latency: {node.telemetry.latency_ms}ms &nbsp;|&nbsp; tokens:{" "}
-            {(node.telemetry.prompt_tokens ?? 0) +
-              (node.telemetry.completion_tokens ?? 0)}
+          <div className="text-gray-500 space-y-0.5">
+            <div>
+              latency: <span className="text-gray-400">{node.telemetry.latency_ms}ms</span>
+            </div>
+            {((node.telemetry.prompt_tokens ?? 0) + (node.telemetry.completion_tokens ?? 0)) > 0 && (() => {
+              const inp  = node.telemetry.prompt_tokens ?? 0;
+              const out  = node.telemetry.completion_tokens ?? 0;
+              const cost = calcCost(inp, out, node.telemetry.model_name);
+              const label = lookupModel(node.telemetry.model_name)?.label ?? node.telemetry.model_name;
+              return (
+                <>
+                  <div>
+                    tokens:{" "}
+                    <span className="text-indigo-300 font-mono">
+                      {inp.toLocaleString()}
+                    </span>
+                    {" "}in /{" "}
+                    <span className="text-indigo-300 font-mono">
+                      {out.toLocaleString()}
+                    </span>
+                    {" "}out
+                  </div>
+                  {cost != null && (
+                    <div>
+                      est. cost:{" "}
+                      <span className={`font-mono font-semibold ${costColor(cost)}`}>
+                        {formatCost(cost)}
+                      </span>
+                    </div>
+                  )}
+                  {label && (
+                    <div>
+                      model:{" "}
+                      <span className="text-gray-400 font-mono text-[9px]">{label}</span>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
       </div>

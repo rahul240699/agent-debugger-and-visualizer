@@ -3,6 +3,7 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { useRunStore, type DagNodeData } from "@/store/useRunStore";
+import { calcCost, formatCost, costColor, lookupModel } from "@/lib/pricing";
 
 const STATUS_STYLE: Record<
   string,
@@ -64,10 +65,13 @@ export const DagNodeComponent = memo(function DagNodeComponent({
   const selectNode = useRunStore((s) => s.selectNode);
   const style = STATUS_STYLE[data.status] ?? STATUS_STYLE.PENDING;
 
-  const totalTokens =
-    (data.telemetry.prompt_tokens ?? 0) +
-    (data.telemetry.completion_tokens ?? 0);
-  const latency = data.telemetry.latency_ms;
+  const promptTokens     = data.telemetry.prompt_tokens ?? 0;
+  const completionTokens = data.telemetry.completion_tokens ?? 0;
+  const totalTokens      = promptTokens + completionTokens;
+  const latency          = data.telemetry.latency_ms;
+  const modelName        = data.telemetry.model_name;
+  const cost             = calcCost(promptTokens, completionTokens, modelName);
+  const modelLabel       = lookupModel(modelName)?.label ?? modelName;
 
   return (
     <>
@@ -98,16 +102,44 @@ export const DagNodeComponent = memo(function DagNodeComponent({
           )}
         </div>
 
-        {/* Telemetry micro-bar */}
+        {/* Telemetry bar */}
         {(totalTokens > 0 || latency !== undefined) && (
-          <div className="mt-1.5 flex items-center gap-2 text-[10px] text-gray-400">
-            {latency !== undefined && (
-              <span title="Latency">{latency}ms</span>
-            )}
-            {totalTokens > 0 && (
-              <span title="Total tokens" className="text-indigo-400">
-                {totalTokens}tok
-              </span>
+          <div
+            className="mt-1.5 space-y-0.5"
+            title={[
+              modelLabel ? `Model: ${modelLabel}` : null,
+              promptTokens     ? `Prompt:     ${promptTokens.toLocaleString()} tok` : null,
+              completionTokens ? `Completion: ${completionTokens.toLocaleString()} tok` : null,
+              totalTokens      ? `Total:      ${totalTokens.toLocaleString()} tok` : null,
+              cost != null     ? `Est. cost:  ${formatCost(cost)}` : null,
+            ].filter(Boolean).join("\n")}
+          >
+            {/* Row 1: latency + token breakdown */}
+            <div className="flex items-center gap-2 text-[10px] text-gray-400">
+              {latency !== undefined && (
+                <span>{latency}ms</span>
+              )}
+              {totalTokens > 0 && (
+                <span className="text-indigo-400 font-mono">
+                  {promptTokens > 0 && completionTokens > 0
+                    ? <>{promptTokens.toLocaleString()}<span className="text-gray-600">↑</span>{completionTokens.toLocaleString()}<span className="text-gray-600">↓</span></>
+                    : <>{totalTokens.toLocaleString()} tok</>
+                  }
+                </span>
+              )}
+            </div>
+
+            {/* Row 2: dollar cost badge */}
+            {cost != null && (
+              <div className={`flex items-center gap-1 font-mono text-[10px] font-semibold ${costColor(cost)}`}>
+                <span>≈</span>
+                <span>{formatCost(cost)}</span>
+                {modelLabel && (
+                  <span className="text-gray-600 font-normal text-[9px] truncate max-w-[90px]">
+                    · {modelLabel}
+                  </span>
+                )}
+              </div>
             )}
           </div>
         )}
