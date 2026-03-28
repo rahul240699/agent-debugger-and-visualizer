@@ -1,18 +1,48 @@
 # Agent Debugger & Trajectory Visualizer
 
-Real-time observability dashboard for LangGraph multi-agent pipelines. Captures agent reasoning, tool calls, state deltas, and critic scores as they happen — and visualizes them as a live DAG, flame graph, and state inspector.
+Real-time observability dashboard for LangGraph multi-agent pipelines. Captures agent reasoning, tool calls, state deltas, critic scores, token usage, and dollar cost as they happen — and visualizes them as a live DAG, flame graph, state inspector, and cost tracker.
 
 ---
 
 ## Features
 
 ### Live Dashboard
-- **DAG Canvas** — live node graph with status colours: pulsing yellow (active), green (success), red (error). Fan-in and fan-out edges are rendered correctly for any topology.
+- **DAG Canvas** — live node graph with status colours: pulsing yellow (active), green (success), red (error), pulsing sky-blue (interrupted/paused). Fan-in and fan-out edges are rendered correctly for any topology.
 - **Event Log** — chronological stream of every trace event; click any row to jump to that node's state.
-- **State Inspector** — incremental RFC 6902 JSON diff of agent state at the selected node, with collapsible keys and inline `more/less` for long values.
+- **State Inspector** — incremental RFC 6902 JSON diff of agent state at the selected node, with collapsible keys and inline `more/less` for long values. Also shows per-node token breakdown (prompt / completion), estimated dollar cost, and model name.
 - **Critic Panel** — async LLM alignment scores (0.0 – 1.0) and divergence flags per node, computed in the background without blocking the agent.
 - **Flame Graph** — node execution time (bar width) and token heat (bar colour) across the full run timeline.
 - **Recent Runs dropdown** — instantly reconnect to any run stored in Redis (last 24 h).
+- **Run cost badge** — header shows a live running total (`7n / 77e · $0.043`) of estimated LLM spend across all nodes the moment they complete.
+
+### Token & Cost Tracking
+Every node that calls an LLM shows:
+- **Token breakdown** — `500↑597↓` (prompt tokens up, completion tokens down)
+- **Dollar cost badge** — `≈ $0.0087 · GPT-4o` colour-coded by magnitude (emerald → teal → yellow → orange → red)
+- **Tooltip** — full breakdown on hover: model name, prompt tokens, completion tokens, estimated cost
+
+Costs are calculated from a built-in pricing table covering all major providers:
+
+| Provider | Models |
+|---|---|
+| **OpenAI** | o1, o3-mini, GPT-4o, GPT-4o mini, GPT-4 Turbo, GPT-4, GPT-3.5 Turbo |
+| **Anthropic** | Claude 3.5 Sonnet, Claude 3.5 Haiku, Claude 3 Opus, Claude 3 Sonnet, Claude 3 Haiku |
+| **Google** | Gemini 2.0 Flash, Gemini 2.0 Flash Lite, Gemini 1.5 Pro, Gemini 1.5 Flash |
+
+Model names are matched by substring — versioned names like `gpt-4o-2024-08-06` resolve automatically.
+
+### Human-in-the-Loop: Interrupt & Edit State
+LangGraph's `interrupt_before` mechanism is fully wired into the UI:
+
+1. In the **Pipeline Builder**, toggle the **⏸ button** on any node to mark it "pause before".
+2. When the run reaches that node, execution freezes and the node turns **sky-blue** in the DAG.
+3. An **Interrupt Banner** slides up from the bottom of the canvas showing the live agent state.
+4. Two actions:
+   - **▶ Approve & Continue** — resumes without changes
+   - **✎ Edit & Resume** — opens textareas for each state field; submit a patch and LangGraph applies it via `graph.update_state()` before resuming
+5. Append-only fields (`fact_check_notes`, `domain_notes`) are labelled **→ appends** so you know edits will concatenate rather than replace.
+
+Runs time out after 10 minutes if no action is taken.
 
 ### Pipeline Builder
 A no-code visual canvas for assembling your own agent pipelines without writing Python:
@@ -20,10 +50,15 @@ A no-code visual canvas for assembling your own agent pipelines without writing 
 1. Go to **[Builder](http://localhost:3000/builder)** from the home page.
 2. Click components from the left palette to drop them on the canvas.
 3. Drag handles to connect nodes in any topology (sequential, parallel, fan-in, fan-out).
-4. Enter a research topic and click **Run →**.
-5. The dashboard opens automatically and streams the execution in real time.
+4. Optionally toggle **⏸** on any node to pause execution before it runs.
+5. Enter a research topic and click **Run →**.
+6. The dashboard opens automatically and streams the execution in real time.
+7. Click **⬡ Builder** in the dashboard header to return — your full pipeline (nodes, edges, positions, pause-before toggles, topic) is automatically restored.
 
 The builder sends the full graph topology to the backend, so every edge you draw — including multiple parents feeding into one node — appears correctly in the DAG.
+
+### Canvas Persistence
+The Pipeline Builder auto-saves all canvas state (nodes, edges, topic, pause-before toggles) to `localStorage`. Navigating back via the dashboard's **Builder** link restores everything exactly. Opening the Builder page fresh always starts with an empty canvas. The **✕ Clear** button wipes saved state.
 
 ### Built-in Component Library
 
@@ -59,8 +94,9 @@ probe.flush()  # wait for all Redis writes to land
 
 The probe captures:
 - `CHAIN_START` / `CHAIN_END` — DAG node lifecycle + state diffs
-- `LLM_START` / `LLM_END` — token usage (prompt, completion, total), latency, and internal monologue
+- `LLM_START` / `LLM_END` — token usage (prompt, completion, total), model name, latency, and internal monologue
 - `TOOL_CALL` / `TOOL_RESULT` — every tool invocation with inputs, outputs, and latency
+- `INTERRUPT` — emitted when a run pauses at an `interrupt_before` node, including a snapshot of the current state
 - Retry / cycle detection — revisited nodes appear as `node_id#iter1`, `#iter2`, … with loopback edges
 
 ---
@@ -74,10 +110,15 @@ Your LangGraph Agent  (or Pipeline Builder)
 instrumentation/   ← Python probe (non-blocking callbacks)
       │  emits TraceEvents → Redis Stream + Pub/Sub
       ▼
-backend/           ← FastAPI + WebSockets (streams deltas to browser)
-      │  also stores run topology for builder runs
+backend/           ← FastAPI + WebSockets
+      │  run_manager: threads + resume events for interrupt/resume
+      │  interrupt API: GET interrupt-state, POST resume
+      │  stores run topology for builder runs
       ▼
-frontend/          ← Next.js 14 dashboard (DAG, Flame Graph, State Inspector, Critic)
+frontend/          ← Next.js 14
+      │  DAG, Flame Graph, State Inspector, Critic, InterruptBanner
+      │  pricing.ts: token → dollar cost (14 models across 3 providers)
+      └  useRunStore (Zustand + Immer): live state + interrupt info
 ```
 
 ---
@@ -170,7 +211,10 @@ Open the URL — the DAG populates in real time.
 2. Click **Build your own ⬡** (or **⬡ Builder** in the dashboard header)
 3. Click components from the palette to add them to the canvas
 4. Connect them by dragging from a node's bottom handle to another node's top handle
-5. Type a topic and click **Run →**
+5. Optionally click **⏸** on a node to pause before it runs
+6. Type a topic and click **Run →**
+
+After the run completes, click **⬡ Builder** in the header to return with your pipeline fully restored.
 
 ---
 
@@ -227,8 +271,22 @@ curl -X POST http://localhost:8000/api/build \
       {"source": "planner",        "target": "web_researcher"},
       {"source": "web_researcher", "target": "aggregator"},
       {"source": "aggregator",     "target": "finalize"}
-    ]
+    ],
+    "interrupt_before": ["aggregator"]
   }'
+
+# Check interrupt state (when a run is paused)
+curl http://localhost:8000/api/runs/{run_id}/interrupt-state
+
+# Resume a paused run — approve unchanged
+curl -X POST http://localhost:8000/api/runs/{run_id}/resume \
+  -H "Content-Type: application/json" \
+  -d '{"action": "approve"}'
+
+# Resume a paused run — edit state first
+curl -X POST http://localhost:8000/api/runs/{run_id}/resume \
+  -H "Content-Type: application/json" \
+  -d '{"action": "edit", "state_patch": {"aggregated_draft": "My revised draft..."}}'
 ```
 
 ---
@@ -237,11 +295,12 @@ curl -X POST http://localhost:8000/api/build \
 
 | Panel | What it shows |
 |---|---|
-| **DAG Canvas** | Live node graph — gray (pending), pulsing yellow (active), green (success), red (error) |
+| **DAG Canvas** | Live node graph — gray (pending), pulsing yellow (active), green (success), red (error), pulsing sky-blue (interrupted) |
 | **Event Log** | Chronological stream of every TraceEvent; click any row to select that node |
-| **State Inspector** | RFC 6902 JSON diff — what changed in agent state at the selected node |
+| **State Inspector** | RFC 6902 JSON diff — what changed in agent state at the selected node; plus token breakdown, estimated cost, and model name |
 | **Critic** | LLM alignment scores (0–1) and divergence flags per node |
 | **Flame Graph** | Node latency (width) and token heat (colour) across the full run timeline |
+| **Interrupt Banner** | Slides up when a run is paused — shows live state, Approve & Continue or Edit & Resume buttons |
 
 ---
 
@@ -253,3 +312,4 @@ docker-compose up --build
 ```
 
 Services: Redis on `6379`, backend on `8000`, frontend on `3000`.
+
