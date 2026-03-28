@@ -8,6 +8,7 @@ POST /api/build               — accept a graph spec, start it in a background 
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import uuid
 
@@ -17,7 +18,9 @@ from pydantic import BaseModel
 from instrumentation import AgentProbe
 from instrumentation.components import REGISTRY, ResearchState
 from instrumentation.dynamic_graph import build_dynamic_graph
+from backend.run_manager import RunHandle, register, remove
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -51,6 +54,7 @@ class BuildRequest(BaseModel):
     nodes: list[NodeSpec]
     edges: list[EdgeSpec]
     run_id: str | None = None
+    interrupt_before: list[str] = []
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +95,9 @@ async def build_and_run(req: BuildRequest, request: Request) -> dict:
     edges_list = [{"source": e.source, "target": e.target} for e in req.edges]
 
     try:
-        graph = build_dynamic_graph(nodes_list, edges_list)
+        graph = build_dynamic_graph(
+            nodes_list, edges_list, interrupt_before=req.interrupt_before
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -120,11 +126,53 @@ async def build_and_run(req: BuildRequest, request: Request) -> dict:
     }
 
     def _run() -> None:
+        handle = RunHandle(
+            run_id=run_id,
+            graph=graph,
+            config={"configurable": {"thread_id": run_id}},
+        )
+        register(run_id, handle)
         probe = AgentProbe(run_id=run_id)
+        invoke_cfg = {**handle.config, "callbacks": [probe]}
         try:
-            graph.invoke(initial_state, config={"callbacks": [probe]})
+            # --- first invocation (may pause at first interrupt_before node) ---
+            graph.invoke(initial_state, config=invoke_cfg)
+
+            # --- interrupt loop ---
+            snapshot = graph.get_state(handle.config)
+            while snapshot.next:
+                interrupted_nodes = list(snapshot.next)
+                current_state = dict(snapshot.values)
+
+                probe.emit_interrupt(interrupted_nodes, current_state)
+                handle.status = "INTERRUPTED"
+                handle.interrupted_nodes = interrupted_nodes
+                handle.interrupted_state = current_state
+
+                # Block until the resume endpoint signals us (10-min safety timeout)
+                signaled = handle.resume_event.wait(timeout=600)
+                handle.resume_event.clear()
+
+                if handle.cancel or not signaled:
+                    logger.warning("Run %s cancelled or timed out at interrupt", run_id)
+                    break
+
+                # Apply optional state patch (set by resume endpoint)
+                if handle.state_patch:
+                    graph.update_state(handle.config, handle.state_patch)
+                    handle.state_patch = None
+
+                handle.status = "RUNNING"
+                graph.invoke(None, config=invoke_cfg)
+                snapshot = graph.get_state(handle.config)
+
+            handle.status = "COMPLETE"
+        except Exception as exc:
+            handle.status = "ERROR"
+            logger.error("Run %s failed: %s", run_id, exc)
         finally:
             probe.flush()
+            remove(run_id)
 
     threading.Thread(target=_run, daemon=True).start()
     return {"run_id": run_id}

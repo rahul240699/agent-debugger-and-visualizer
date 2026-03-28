@@ -58,6 +58,12 @@ export interface DagEdge {
   isRetry?: boolean;
 }
 
+export interface InterruptInfo {
+  runId: string;
+  nodeIds: string[];
+  state: Record<string, unknown>;
+}
+
 interface RunStore {
   runId: string | null;
   /** node key (may include #iterN suffix) → DagNodeData */
@@ -70,6 +76,8 @@ interface RunStore {
   nodeVisitCounts: Record<string, number>;
   /** ID of the node whose details are shown in side panels */
   selectedNodeId: string | null;
+  /** Set when the run is paused at an interrupt_before node */
+  interruptInfo: InterruptInfo | null;
 
   // Actions
   setRunId: (id: string) => void;
@@ -77,6 +85,7 @@ interface RunStore {
   applyEvent: (event: TraceEvent) => void;
   hydrate: (msg: HydrateMessage) => void;
   reset: () => void;
+  clearInterrupt: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +126,7 @@ const initialState = {
   seenIds: {} as Record<string, true>,
   nodeVisitCounts: {} as Record<string, number>,
   selectedNodeId: null as string | null,
+  interruptInfo: null as InterruptInfo | null,
 };
 
 export const useRunStore = create<RunStore>()((set) => ({
@@ -127,6 +137,8 @@ export const useRunStore = create<RunStore>()((set) => ({
   selectNode: (id) => set({ selectedNodeId: id }),
 
   reset: () => set({ ...initialState }),
+
+  clearInterrupt: () => set({ interruptInfo: null }),
 
   hydrate: (msg: HydrateMessage) =>
     set(
@@ -316,6 +328,34 @@ function applyEventMutation(draft: typeof initialState, event: TraceEvent) {
           payload.state_delta
         );
       }
+      break;
+    }
+
+    case "INTERRUPT": {
+      // Upsert each interrupted node in the DAG with INTERRUPTED status
+      const info = payload.interrupt_state;
+      if (!info) break;
+      for (const nid of info.interrupted_nodes) {
+        if (!draft.nodes[nid]) {
+          draft.nodes[nid] = {
+            id: nid,
+            label: nid,
+            status: "INTERRUPTED",
+            iteration: 0,
+            telemetry: {},
+            toolCalls: [],
+            stateMirror: {},
+          };
+        } else {
+          draft.nodes[nid].status = "INTERRUPTED";
+        }
+      }
+      // Surface the interrupt banner
+      draft.interruptInfo = {
+        runId: event.run_id,
+        nodeIds: info.interrupted_nodes,
+        state: info.state,
+      };
       break;
     }
   }

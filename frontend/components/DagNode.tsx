@@ -36,13 +36,21 @@ const STATUS_STYLE: Record<
     animation: "node-alert",
     glow: "shadow-[0_0_16px_2px_rgba(239,68,68,0.18)]",
   },
+  INTERRUPTED: {
+    border: "border-sky-500/70",
+    bg: "bg-sky-950/30",
+    text: "text-sky-300",
+    animation: "node-active",
+    glow: "shadow-[0_0_16px_2px_rgba(56,189,248,0.2)]",
+  },
 };
 
 const STATUS_DOT: Record<string, string> = {
-  PENDING: "bg-gray-600",
-  ACTIVE:  "bg-yellow-400",
-  SUCCESS: "bg-emerald-500",
-  ALERT:   "bg-red-500",
+  PENDING:     "bg-gray-600",
+  ACTIVE:      "bg-yellow-400",
+  SUCCESS:     "bg-emerald-500",
+  ALERT:       "bg-red-500",
+  INTERRUPTED: "bg-sky-400",
 };
 
 type DagNodeProps = NodeProps & {

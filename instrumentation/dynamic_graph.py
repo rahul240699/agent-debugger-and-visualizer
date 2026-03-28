@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from instrumentation.components import REGISTRY, ResearchState
@@ -30,10 +31,16 @@ def _route_critic(state: ResearchState) -> Literal["revise", "finalize"]:
 def build_dynamic_graph(
     nodes: list[dict],
     edges: list[dict],
+    interrupt_before: list[str] | None = None,
 ):
     """
     Compile a LangGraph from a visual spec.  Returns a compiled graph ready
     for ``graph.invoke(initial_state, config={"callbacks": [probe]})``.
+
+    When interrupt_before is provided, the graph will pause execution before
+    those nodes and wait for an explicit resume signal (see RunHandle).
+    A MemorySaver checkpointer is always attached so the graph state survives
+    between the initial invoke() and subsequent resume invoke() calls.
     """
     if not nodes:
         raise ValueError("Graph must contain at least one node.")
@@ -97,4 +104,7 @@ def build_dynamic_graph(
     for end_id in all_ids - sources:
         builder.add_edge(end_id, END)
 
-    return builder.compile()
+    return builder.compile(
+        checkpointer=MemorySaver(),
+        interrupt_before=interrupt_before or [],
+    )

@@ -32,6 +32,16 @@
   animation: node-shake 0.4s ease-in-out;
 }
 
+/* Slide-up animation for InterruptBanner */
+@keyframes slide-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;

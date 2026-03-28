@@ -21,6 +21,7 @@ export interface BuilderNodeData {
   writes: string[];
   tools: string[];
   instanceIndex: number;
+  interruptBefore?: boolean;
   [key: string]: unknown; // React Flow requires index signature
 }
 
@@ -49,7 +50,7 @@ export const BuilderNodeComponent = memo(function BuilderNodeComponent({
   data,
   selected,
 }: Props) {
-  const { deleteElements } = useReactFlow();
+  const { deleteElements, setNodes } = useReactFlow();
   const c = COLOR[data.color] ?? FALLBACK;
 
   return (
@@ -67,23 +68,46 @@ export const BuilderNodeComponent = memo(function BuilderNodeComponent({
           ${selected ? "ring-2 ring-white/30 ring-offset-1 ring-offset-gray-950 shadow-lg" : "shadow-md"}
         `}
       >
-        {/* Delete button */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            deleteElements({ nodes: [{ id }] });
-          }}
-          className="absolute top-1.5 right-1.5 w-4 h-4 flex items-center justify-center
-            text-gray-600 hover:text-gray-200 hover:bg-gray-700/60 rounded transition-colors
-            text-[10px] leading-none z-10"
-          title="Remove node"
-        >
-          ✕
-        </button>
+        {/* Delete + pause-before buttons */}
+        <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 z-10">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setNodes((nds) =>
+                nds.map((n) =>
+                  n.id === id
+                    ? { ...n, data: { ...n.data, interruptBefore: !n.data.interruptBefore } }
+                    : n
+                )
+              );
+            }}
+            className={`w-5 h-5 flex items-center justify-center rounded transition-colors text-[11px] leading-none
+              ${
+                data.interruptBefore
+                  ? "bg-sky-700/60 text-sky-300 hover:bg-sky-600/60"
+                  : "text-gray-600 hover:text-gray-300 hover:bg-gray-700/60"
+              }`}
+            title={data.interruptBefore ? "Remove pause-before" : "Pause before this node"}
+          >
+            ⏸
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              deleteElements({ nodes: [{ id }] });
+            }}
+            className="w-4 h-4 flex items-center justify-center
+              text-gray-600 hover:text-gray-200 hover:bg-gray-700/60 rounded transition-colors
+              text-[10px] leading-none"
+            title="Remove node"
+          >
+            ✕
+          </button>
+        </div>
 
         <div className="px-3 pt-3 pb-2.5">
           {/* Header */}
-          <div className="flex items-center gap-2 mb-2 pr-4">
+          <div className="flex items-center gap-2 mb-2 pr-10">
             <span className={`w-2 h-2 rounded-full shrink-0 ${c.dot}`} />
             <span className={`text-xs font-semibold leading-tight ${c.text}`}>
               {data.label}
@@ -141,6 +165,14 @@ export const BuilderNodeComponent = memo(function BuilderNodeComponent({
                   🔧 {t}
                 </span>
               ))}
+            </div>
+          )}
+
+          {/* Pause-before badge */}
+          {data.interruptBefore && (
+            <div className="mt-2 flex items-center gap-1 border-t border-sky-900/40 pt-1.5">
+              <span className="text-sky-400 text-[10px]">⏸</span>
+              <span className="text-[9px] text-sky-400 font-medium">pause before</span>
             </div>
           )}
         </div>

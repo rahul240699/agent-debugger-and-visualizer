@@ -9,6 +9,7 @@ import EventLog from "./EventLog";
 import FlameGraph from "./FlameGraph";
 import StateInspector from "./StateInspector";
 import CriticPanel from "./CriticPanel";
+import InterruptBanner from "./InterruptBanner";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -234,6 +235,7 @@ export default function DashboardClient() {
             </div>
           )}
           <DagCanvas />
+          <InterruptBanner />
         </main>
 
         {/* State Inspector / Critic sidebar */}

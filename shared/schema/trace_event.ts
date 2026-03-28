@@ -17,9 +17,11 @@ export type EventType =
   | "LLM_END"
   | "STATE_DELTA"
   | "CRITIC_SCORE"
-  | "HYDRATE";
+  | "HYDRATE"
+  | "INTERRUPT"
+  | "RESUME";
 
-export type NodeStatus = "PENDING" | "ACTIVE" | "SUCCESS" | "ALERT";
+export type NodeStatus = "PENDING" | "ACTIVE" | "SUCCESS" | "ALERT" | "INTERRUPTED";
 
 // ---------------------------------------------------------------------------
 // Sub-interfaces
@@ -65,6 +67,11 @@ export interface TracePayload {
   raw_inputs?: Record<string, unknown>;
   raw_outputs?: Record<string, unknown>;
   error_message?: string;
+  /** Present on INTERRUPT events — carries the full graph state at pause time */
+  interrupt_state?: {
+    interrupted_nodes: string[];
+    state: Record<string, unknown>;
+  };
 }
 
 // ---------------------------------------------------------------------------

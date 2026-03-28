@@ -27,6 +27,8 @@ class EventType(str, Enum):
     STATE_DELTA = "STATE_DELTA"
     CRITIC_SCORE = "CRITIC_SCORE"
     HYDRATE = "HYDRATE"
+    INTERRUPT = "INTERRUPT"
+    RESUME = "RESUME"
 
 
 class NodeStatus(str, Enum):
@@ -34,6 +36,7 @@ class NodeStatus(str, Enum):
     ACTIVE = "ACTIVE"
     SUCCESS = "SUCCESS"
     ALERT = "ALERT"
+    INTERRUPTED = "INTERRUPTED"
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +92,8 @@ class TracePayload(BaseModel):
     raw_inputs: Optional[dict[str, Any]] = None
     raw_outputs: Optional[dict[str, Any]] = None
     error_message: Optional[str] = None
+    # Present on INTERRUPT events — carries the full graph state at pause time
+    interrupt_state: Optional[dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------

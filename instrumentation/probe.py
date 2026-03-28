@@ -173,9 +173,50 @@ class AgentProbe(BaseCallbackHandler):
         """Wait for all pending Redis publishes to complete. Call after graph.invoke()."""
         self._emitter.flush()
 
-    # ------------------------------------------------------------------
-    # Chain hooks (maps to LangGraph node lifecycle)
-    # ------------------------------------------------------------------
+    def emit_interrupt(
+        self, interrupted_nodes: list[str], state: dict[str, Any]
+    ) -> None:
+        """
+        Emit an INTERRUPT TraceEvent when the graph pauses before a node.
+
+        Called directly from the run-loop thread (not from a LangChain callback).
+        The first entry in interrupted_nodes is used as the primary node_id so the
+        frontend can upsert it in the DAG with INTERRUPTED status.
+        """
+        # Serialise state for transport — skip messages (too large), cap strings
+        safe_state: dict[str, Any] = {}
+        for k, v in state.items():
+            if k == "messages":
+                continue
+            if isinstance(v, str):
+                safe_state[k] = v[:2000] + ("…" if len(v) > 2000 else "")
+            elif isinstance(v, (int, float, bool, type(None))):
+                safe_state[k] = v
+            else:
+                safe_state[k] = str(v)
+
+        node_id = interrupted_nodes[0] if interrupted_nodes else "__interrupt__"
+        self._emit(
+            TraceEvent(
+                run_id=self.run_id,
+                node_id=node_id,
+                event_type=EventType.INTERRUPT,
+                timestamp_ms=self._now_ms(),
+                sequence=self._next_seq(),
+                status=NodeStatus.INTERRUPTED,
+                payload=TracePayload(
+                    interrupt_state={
+                        "interrupted_nodes": interrupted_nodes,
+                        "state": safe_state,
+                    }
+                ),
+            )
+        )
+        # Flush immediately so the frontend sees the INTERRUPTED status before
+        # the background thread blocks on resume_event.wait().
+        self._emitter.flush()
+
+
 
     def on_chain_start(
         self,

@@ -137,6 +137,7 @@ export default function BuilderCanvas() {
         writes: meta.writes,
         tools: meta.tools,
         instanceIndex: count,
+        interruptBefore: false,
       } satisfies BuilderNodeData,
     };
 
@@ -167,12 +168,15 @@ export default function BuilderCanvas() {
       source: e.source,
       target: e.target,
     }));
+    const interruptBefore = nodes
+      .filter((n) => (n.data as BuilderNodeData).interruptBefore)
+      .map((n) => n.id);
 
     try {
       const res = await fetch(`${API}/api/build`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: t, nodes: nodeSpecs, edges: edgeSpecs }),
+        body: JSON.stringify({ topic: t, nodes: nodeSpecs, edges: edgeSpecs, interrupt_before: interruptBefore }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ detail: res.statusText }));
